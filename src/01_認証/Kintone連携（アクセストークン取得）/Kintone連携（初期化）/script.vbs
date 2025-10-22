@@ -311,10 +311,18 @@ Sub KNTN_InitScriptEngine()
     kntn_ScriptEngine.AddCode "function Parse(str) { return eval('(' + str + ')'); };"
     'keyに対応するvalueを返却する関数
     kntn_ScriptEngine.AddCode "function getProperty(jsonObj, propertyName) { return jsonObj[propertyName]; } "
-    'keyの一覧を取得する関数
+    'keyの一覧を取得する関数（配列として返す）
     kntn_ScriptEngine.AddCode "function getKeys(jsonObj) { var keys = new Array(); for (var i in jsonObj) { keys.push(i); } return keys; } "
+    'keyの数を取得する関数
+    kntn_ScriptEngine.AddCode "function getKeysCount(jsonObj) { var count = 0; for (var i in jsonObj) { count++; } return count; } "
+    'インデックス指定でkeyを取得する関数
+    kntn_ScriptEngine.AddCode "function getKeyByIndex(jsonObj, index) { var keys = getKeys(jsonObj); return keys[index]; } "
     'keyが存在するかをチェックする関数
     kntn_ScriptEngine.AddCode "function checkKey(jsonObj,key) { return key in jsonObj; } "
+    '配列の長さを取得する関数
+    kntn_ScriptEngine.AddCode "function getArrayLength(arr) { return arr.length; } "
+    'インデックス指定で配列要素を取得する関数
+    kntn_ScriptEngine.AddCode "function getArrayItem(arr, index) { return arr[index]; } "
 End Sub
 
 '=====================================================
@@ -378,22 +386,33 @@ function KNTN_getFieldJson(field,nameOrCode,json_properties)
   dim json_field
   'フィールド名指定の場合は繰り返し取得する
   if nameOrCode = "フィールド名" then
-    Dim KeysObject,key
-    'keyの一覧を取得する
-    Set KeysObject = kntn_ScriptEngine.Run("getKeys", json_properties)
-    For Each key In KeysObject
+    Dim key, i, keysCount
+    'keyの数を取得する
+    keysCount = kntn_ScriptEngine.Run("getKeysCount", json_properties)
+    For i = 0 To keysCount - 1
+      'インデックス指定でkeyを取得する
+      key = kntn_ScriptEngine.Run("getKeyByIndex", json_properties, i)
+
       'それぞれのkeyに該当するフィールドを取得する
-      set json_field =kntn_ScriptEngine.Run("getProperty", json_properties,key)
+      set json_field = kntn_ScriptEngine.Run("getProperty", json_properties,key)
+
+      'json_fieldがnullでないことを確認してからlabelプロパティにアクセス
+      if Not (json_field Is Nothing) then
         'フィールド名を取得し、一致していたら処理を抜ける
         if json_field.label = field then
           set KNTN_getFieldJson = json_field
           exit for
         end if
+      end if
     Next
   else
     'フィールドコードの場合はjsonを取得する
-    set json_field =kntn_ScriptEngine.Run("getProperty", json_properties,field)
-    set KNTN_getFieldJson = json_field
+    if kntn_ScriptEngine.Run("checkKey", json_properties, field) then
+      set json_field = kntn_ScriptEngine.Run("getProperty", json_properties,field)
+      set KNTN_getFieldJson = json_field
+    else
+      set KNTN_getFieldJson = Nothing
+    end if
   end if
 end function
 
@@ -543,8 +562,8 @@ sub KNTN_getHeaderArray(json_properties,outputType,nameOrCode,rootArray,arrayNam
   dim json_field,json_lookup
 
   'property項目のkey一覧を取得する
-  Dim KeysObject,key
-  Set KeysObject = kntn_ScriptEngine.Run("getKeys", json_properties)
+  Dim key, i, keysCount
+  keysCount = kntn_ScriptEngine.Run("getKeysCount", json_properties)
   
 
   dim tmpArray()
@@ -553,10 +572,10 @@ sub KNTN_getHeaderArray(json_properties,outputType,nameOrCode,rootArray,arrayNam
   if flgTable = False then
     '登録ではレコードIDを利用しない
     if outputType="レコード登録用フィールド取得（ヘッダーのみ）" then
-      redim tmpArray(2,KeysObject.length)
+      redim tmpArray(2,keysCount)
       colNum =0
     else
-      redim tmpArray(2,KeysObject.length+1)
+      redim tmpArray(2,keysCount+1)
       tmpArray(0,0) = "$id"
       tmpArray(1,0) = "レコードID" 
       colNum =1
@@ -564,12 +583,12 @@ sub KNTN_getHeaderArray(json_properties,outputType,nameOrCode,rootArray,arrayNam
   else
     'テーブルの登録では行IDを利用しない
     if outputType="レコード登録用フィールド取得（ヘッダーのみ）" then
-      redim tmpArray(2,KeysObject.length+1)
+      redim tmpArray(2,keysCount+1)
       tmpArray(0,0) = "$id"
       tmpArray(1,0) = "レコードID"
       colNum =1 
     else 
-      redim tmpArray(2,KeysObject.length+2)
+      redim tmpArray(2,keysCount+2)
       tmpArray(0,0) = "$id"
       tmpArray(1,0) = "レコードID"
       tmpArray(0,1) = "rowId"
@@ -578,7 +597,9 @@ sub KNTN_getHeaderArray(json_properties,outputType,nameOrCode,rootArray,arrayNam
     end if
   end if
 
-  For Each key In KeysObject
+  For i = 0 To keysCount - 1
+    'インデックス指定でkeyを取得する
+    key = kntn_ScriptEngine.Run("getKeyByIndex", json_properties, i)
     'フィールド名・フィールドコード・フィールドタイプを取得する。
     set json_field =kntn_ScriptEngine.Run("getProperty", json_properties,key)
     fieldtype = json_field.type 
@@ -698,18 +719,23 @@ end function
 function KNTN_CreateLookUpArray(json_properties)
   dim json_field,json_lookup
 
-  Dim KeysObject,key
-  Set KeysObject = kntn_ScriptEngine.Run("getKeys", json_properties)
+  Dim key, i, keysCount, mappingField
+  keysCount = kntn_ScriptEngine.Run("getKeysCount", json_properties)
   
   'ルックアップの一覧を初めに取得する
   dim lookUpArray()
   redim lookUpArray(0)
-  For Each key In KeysObject
+  For i = 0 To keysCount - 1
+    'インデックス指定でkeyを取得する
+    key = kntn_ScriptEngine.Run("getKeyByIndex", json_properties, i)
     set json_field =kntn_ScriptEngine.Run("getProperty", json_properties,key)
     'lookupキーが存在するかで判断。タイプでは判断できない。
     if kntn_ScriptEngine.Run("checkKey", json_field,"lookup") then
       set json_lookup =  json_field.lookup
-      for each mappingField in json_lookup.fieldMappings
+      Dim mappingFieldsCount, j
+      mappingFieldsCount = kntn_ScriptEngine.Run("getArrayLength", json_lookup.fieldMappings)
+      For j = 0 To mappingFieldsCount - 1
+        Set mappingField = kntn_ScriptEngine.Run("getArrayItem", json_lookup.fieldMappings, j)
         redim preserve lookUpArray(ubound(lookUpArray)+1)
         lookUpArray(ubound(lookUpArray)) = mappingField.field
       next
@@ -718,13 +744,19 @@ function KNTN_CreateLookUpArray(json_properties)
 		'テーブル内にもルックアップが存在する場合がある
 		if json_field.type ="SUBTABLE" then
       set json_field = json_field.fields
-			Set tableKeysObject = kntn_ScriptEngine.Run("getKeys", json_field)
-			For Each tableKey In tableKeysObject
+			Dim tableKey, tableKeysCount, k
+			tableKeysCount = kntn_ScriptEngine.Run("getKeysCount", json_field)
+			For k = 0 To tableKeysCount - 1
+				'インデックス指定でtableKeyを取得する
+				tableKey = kntn_ScriptEngine.Run("getKeyByIndex", json_field, k)
 				set table_field =kntn_ScriptEngine.Run("getProperty", json_field,tableKey)
 				'lookupキーが存在するかで判断。タイプでは判断できない。
 				if kntn_ScriptEngine.Run("checkKey", table_field,"lookup") then
 					set json_lookup =  table_field.lookup
-					for each mappingField in json_lookup.fieldMappings
+					Dim tableMappingFieldsCount, l
+					tableMappingFieldsCount = kntn_ScriptEngine.Run("getArrayLength", json_lookup.fieldMappings)
+					For l = 0 To tableMappingFieldsCount - 1
+						Set mappingField = kntn_ScriptEngine.Run("getArrayItem", json_lookup.fieldMappings, l)
 						redim preserve lookUpArray(ubound(lookUpArray)+1)
 						lookUpArray(ubound(lookUpArray)) = mappingField.field
 					next
@@ -926,7 +958,11 @@ function KNTN_getFieldValue(fieldtype,fieldcode,record,kugirimoji)
 
   case "CHECK_BOX","MULTI_SELECT","カテゴリー"
     set obj =kntn_ScriptEngine.Run("getProperty", record,fieldcode).value
-    for each tmpValue in obj
+    Dim objCount, m
+    objCount = kntn_ScriptEngine.Run("getArrayLength", obj)
+    For m = 0 To objCount - 1
+      Dim tmpValue
+      tmpValue = kntn_ScriptEngine.Run("getArrayItem", obj, m)
       if values = "" then      
         values = tmpValue
       else 
@@ -936,7 +972,11 @@ function KNTN_getFieldValue(fieldtype,fieldcode,record,kugirimoji)
 
   case "USER_SELECT","ORGANIZATION_SELECT","GROUP_SELECT","STATUS_ASSIGNEE"
     set obj =kntn_ScriptEngine.Run("getProperty", record,fieldcode).value
-    for each codeObj in obj
+    Dim objCount2, n
+    objCount2 = kntn_ScriptEngine.Run("getArrayLength", obj)
+    For n = 0 To objCount2 - 1
+      Dim codeObj
+      Set codeObj = kntn_ScriptEngine.Run("getArrayItem", obj, n)
       if values = "" then      
         values = codeObj.code
       else 
@@ -950,7 +990,10 @@ function KNTN_getFieldValue(fieldtype,fieldcode,record,kugirimoji)
 
   case "FILE_NAME"
     set obj =kntn_ScriptEngine.Run("getProperty", record,fieldcode).value
-    for each fileObj in obj
+    Dim objCount3, p, fileObj
+    objCount3 = kntn_ScriptEngine.Run("getArrayLength", obj)
+    For p = 0 To objCount3 - 1
+      Set fileObj = kntn_ScriptEngine.Run("getArrayItem", obj, p)
       if values = "" then      
         values = fileObj.name
       else 
@@ -960,7 +1003,10 @@ function KNTN_getFieldValue(fieldtype,fieldcode,record,kugirimoji)
 
   case "FILE_KEY"
     set obj =kntn_ScriptEngine.Run("getProperty", record,fieldcode).value
-    for each fileObj in obj
+    Dim objCount4, q
+    objCount4 = kntn_ScriptEngine.Run("getArrayLength", obj)
+    For q = 0 To objCount4 - 1
+      Set fileObj = kntn_ScriptEngine.Run("getArrayItem", obj, q)
       if values = "" then      
         values = fileObj.fileKey
       else 
@@ -985,7 +1031,11 @@ function Kntn_GetMainRecord(array_header,array_fieldsinfo,json_records,outputTyp
   recordRow=0
   i = 0
   
-  for each record in json_records
+  Dim recordsCount, recordIndex
+  recordsCount = kntn_ScriptEngine.Run("getArrayLength", json_records)
+  For recordIndex = 0 To recordsCount - 1
+    Dim record
+    Set record = kntn_ScriptEngine.Run("getArrayItem", json_records, recordIndex)
     colNum = 0
     for i = 0 to ubound(array_fieldsinfo,2)
       fieldcode = array_fieldsinfo(0,i)
@@ -1020,23 +1070,30 @@ function Kntn_GetTableRecord(tableCode,array_header,array_fieldsinfo,json_record
   tableRecordCount = 0 
 
   '各レコードの情報を繰り返す
-  for each record in json_records
+  Dim recordsCount2, recordIndex2, tableRecord
+  recordsCount2 = kntn_ScriptEngine.Run("getArrayLength", json_records)
+  For recordIndex2 = 0 To recordsCount2 - 1
+    Set tableRecord = kntn_ScriptEngine.Run("getArrayItem", json_records, recordIndex2)
 		'もしテーブルの閲覧権限がなければデータは取得しない。
-		if kntn_ScriptEngine.Run("checkKey", record,tableCode) = false then
+		if kntn_ScriptEngine.Run("checkKey", tableRecord,tableCode) = false then
 			exit for
 		end if
     'recordからtable情報を取得する                
-    set json_Table = kntn_ScriptEngine.Run("getProperty", record,tableCode)
+    set json_Table = kntn_ScriptEngine.Run("getProperty", tableRecord,tableCode)
     set json_Table = json_Table.value
     'テーブル内の各行を繰り返す
-    for each json_row in json_Table
+    Dim tableRowsCount, tableRowIndex
+    tableRowsCount = kntn_ScriptEngine.Run("getArrayLength", json_Table)
+    For tableRowIndex = 0 To tableRowsCount - 1
+      Dim json_row
+      Set json_row = kntn_ScriptEngine.Run("getArrayItem", json_Table, tableRowIndex)
       rowId = json_row.id
       set rowValues = json_row.Value
       colnum = 2
 
       'テーブルの行が増えるたびに配列のサイズを調整する
       redim preserve array_table(ubound(array_header,2),tablerecordCount)
-      array_table(0,tablerecordCount) = kntn_ScriptEngine.Run("getProperty", record,"$id").value
+      array_table(0,tablerecordCount) = kntn_ScriptEngine.Run("getProperty", tableRecord,"$id").value
       array_table(1,tablerecordCount) = rowId
       
       for i = 2 to ubound(array_fieldsinfo,2)
@@ -1839,7 +1896,7 @@ Function KNTN_GetArraybyExcel(ExcelFilename,sheetName)
     sheetName = left(sheetName,31)
   end if 
 
-' ファイルのパスをフルパスに変換する
+  ' ファイルのパスをフルパスに変換する
   Set fso = CreateObject("Scripting.FileSystemObject")
   filePath = fso.GetAbsolutePathName(ExcelFilename)
 
@@ -1908,7 +1965,41 @@ Function KNTN_GetArraybyExcel(ExcelFilename,sheetName)
   worksheet.Activate
 
   ' ====指定されたセルを取得する==================================================
-	KNTN_GetArraybyExcel = worksheet.Range("A1").CurrentRegion
+  Dim rawData, formattedData()
+  rawData = worksheet.Range("A1").CurrentRegion.Value
+  
+  ' 配列のサイズを取得
+  Dim rowCount, colCount
+  If IsArray(rawData) Then
+    On Error Resume Next
+    rowCount = UBound(rawData, 1)
+    colCount = UBound(rawData, 2)
+    On Error GoTo 0
+    
+    ' 日付フォーマットを保持するために配列を再構築
+    ReDim formattedData(rowCount, colCount)
+    
+    Dim r, c, cellValue
+    For r = 1 To rowCount
+      For c = 1 To colCount
+        cellValue = rawData(r, c)
+        
+        ' 日付型の場合はYYYY/MM/DD形式に変換
+        If IsDate(cellValue) Then
+          formattedData(r, c) = Year(CDate(cellValue)) & "/" & _
+                                Right("0" & Month(CDate(cellValue)), 2) & "/" & _
+                                Right("0" & Day(CDate(cellValue)), 2)
+        Else
+          formattedData(r, c) = cellValue
+        End If
+      Next
+    Next
+    
+    KNTN_GetArraybyExcel = formattedData
+  Else
+    ' 単一セルの場合
+    KNTN_GetArraybyExcel = rawData
+  End If
 
   workbook.close True
   If xlsApp.Workbooks.Count = 0 Then
@@ -1919,8 +2010,7 @@ Function KNTN_GetArraybyExcel(ExcelFilename,sheetName)
   On Error Resume Next
   ShowUMSHighlight(xlsApp.Hwnd)
   On Error Goto 0
-end Function
-
+End Function
 ' -----------------------------------------------------------------------
 ' Sub / Function
 ' 指定のシートを一番前に移動する
