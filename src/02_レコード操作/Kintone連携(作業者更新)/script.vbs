@@ -1,13 +1,13 @@
-' -----------------------------------------------------------------------
+﻿' -----------------------------------------------------------------------
 ' Main
 ' -----------------------------------------------------------------------
 'Kintone連携（アクセストークン）が配置されているかの確認
 if isempty(kntn_client_id) then
-  err.raise 1,"","WinActor for kintone ver1.1.0 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
+  err.raise 1,"","WinActor for kintone ver1.1.1 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
 end if
 
 if isempty(kntn_userAgent) then
-  err.raise 1,"","WinActor for kintone ver1.1.0 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
+  err.raise 1,"","WinActor for kintone ver1.1.1 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
 end if
 
 ' トークンのチェック
@@ -84,4 +84,5 @@ Sub KNTN_UpdateAssignees()
     End Select
   End With
 End Sub
+
 
