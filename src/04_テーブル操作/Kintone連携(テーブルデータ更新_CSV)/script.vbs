@@ -3,11 +3,11 @@
 ' -----------------------------------------------------------------------
 'Kintone連携(アクセストークン)が配置されているかの確認
 If IsEmpty(kntn_client_id) Then
-    Err.Raise 1, "", "WinActor for kintone ver1.1.1 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
+    Err.Raise 1, "", "WinActor for kintone ver1.1.0 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
 End If
 
 If IsEmpty(kntn_userAgent) Then
-    Err.Raise 1, "", "WinActor for kintone ver1.1.1 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
+    Err.Raise 1, "", "WinActor for kintone ver1.1.0 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
 End If
 
 ' トークンのチェック
@@ -94,15 +94,21 @@ Sub Kntn_updateTableDataByCsv()
     
     'フィールド情報一覧の情報をAPIで取得する。
     Dim json_fieldsInfo, json_properties
-    Set json_fieldsInfo = kntn_ScriptEngine.CodeObject.Parse(Kntn_GetFieldsInfo(kntn_app_id, kntn_guestspace_id))
+    ' 修正1: CodeObject.Parse → Run("Parse", ...)
+    Set json_fieldsInfo = kntn_ScriptEngine.Run("Parse", Kntn_GetFieldsInfo(kntn_app_id, kntn_guestspace_id))
     Set json_properties = json_fieldsInfo.properties
     
     '該当のテーブルフィールドの情報を取得する。
     On Error Resume Next
     Dim json_TableInfo
     Set json_TableInfo = Kntn_getFieldJson(fieldtable, nameOrCode, json_properties)
+    If json_TableInfo Is Nothing Then
+        On Error GoTo 0
+        Err.Raise 1, "", "テーブルのフィールド名またはフィールドコードが正しくありません。"
+    End If
     tableName = json_TableInfo.label
-    tableCode = json_TableInfo.Code
+    ' 修正2: Code → code (小文字)
+    tableCode = json_TableInfo.code
     
     If Err.Number <> 0 Then
         On Error GoTo 0
@@ -120,6 +126,8 @@ Sub Kntn_updateTableDataByCsv()
     Array_EntryData = KNTN_ReadCsv(csvFilePath, charcode, 1)
     
     'ヘッダー情報をまとめたRootArrayを求める
+    ' 修正3: outputType変数を明示的に定義
+    outputType = "全フィールド取得"
     Call Kntn_getHeaderArray(json_TableInfo.fields, outputType, nameOrCode, kntn_rootArray, fieldtable, lookUpArray, True)
     
     If nameOrCode = "フィールド名" Then
@@ -200,18 +208,19 @@ Sub Kntn_updateTableDataByCsv()
     Dim array_existsRowIds()
     
     'レコードIDの一覧を繰り返す
-    Dim recordIdKeys
-    Set recordIdKeys = kntn_ScriptEngine.Run("getKeys", recordIdsDictionary)
+    ' 修正4: VBScript DictionaryのKeysを配列として直接取得
+    Dim recordIdKeysArray
+    recordIdKeysArray = recordIdsDictionary.Keys
     Dim keysLength
-    keysLength = recordIdKeys.Length
+    keysLength = UBound(recordIdKeysArray) + 1
     
     For keyIdx = 0 To keysLength - 1
         On Error Resume Next
         flgFirstRow = True
         errmsg = ""
         
-        'JScript9対応: キーを取得
-        recordId = kntn_ScriptEngine.Run("getArrayItem", recordIdKeys, keyIdx)
+        ' 修正5: VBScript Dictionaryから直接キーを取得
+        recordId = recordIdKeysArray(keyIdx)
         
         '処理した行IDの一覧をし配列化する。
         ReDim array_existsRowIds(0)
@@ -230,7 +239,8 @@ Sub Kntn_updateTableDataByCsv()
             ' レスポンステキストを取得
             responseText = .responseText
             statusCode = .status
-            Set json = kntn_ScriptEngine.CodeObject.Parse(responseText)
+            ' 修正6: CodeObject.Parse → Run("Parse", ...)
+            Set json = kntn_ScriptEngine.Run("Parse", responseText)
         End With
         
         If statusCode = 200 Then
@@ -242,10 +252,14 @@ Sub Kntn_updateTableDataByCsv()
             
             Array_RowNumAndRowId = recordIdsDictionary.Item(recordId)
             
-            If json_Table.Length > 0 Then
+            ' 修正7: .Length → Run("getArrayLength", ...)
+            Dim tableLengthCheck
+            tableLengthCheck = kntn_ScriptEngine.Run("getArrayLength", json_Table)
+            
+            If tableLengthCheck > 0 Then
                 'JScript9対応: json_Tableの長さを取得
                 Dim tableLength
-                tableLength = json_Table.Length
+                tableLength = tableLengthCheck
                 
                 For tableIdx = 0 To tableLength - 1
                     'JScript9対応: 配列要素を取得

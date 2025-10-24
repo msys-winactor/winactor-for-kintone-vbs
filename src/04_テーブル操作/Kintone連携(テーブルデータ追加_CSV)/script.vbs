@@ -3,28 +3,28 @@
 ' -----------------------------------------------------------------------
 'Kintone連携(アクセストークン)が配置されているかの確認
 If IsEmpty(kntn_client_id) Then
-    Err.Raise 1, "", "WinActor for kintone ver1.1.1 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
+    Err.Raise 1, "", "WinActor for kintone ver1.1.0 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
 End If
 
 If IsEmpty(kntn_userAgent) Then
-    Err.Raise 1, "", "WinActor for kintone ver1.1.1 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
+    Err.Raise 1, "", "WinActor for kintone ver1.1.0 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
 End If
 
 ' トークンのチェック
 Call Kntn_CheckAccessToken(kntn_client_id)
 
 ' Kintoneの指定アプリのフィールド情報を取得
-Call Kntn_AddTableData()
+Call Kntn_AddTableDataByCsv()
 
 ' -----------------------------------------------------------------------
 ' Sub / Function
 ' -----------------------------------------------------------------------
-Sub Kntn_AddTableData()
+Sub Kntn_AddTableDataByCsv()
     Dim kntn_api_uri
     Dim responseText
     Dim sendData
     Dim kntn_app_id
-    Dim excelFilePath
+    Dim csvFilePath
     
     kntn_app_id = !*アプリID!
     kntn_guestspace_id = !ゲストスペースID!
@@ -32,16 +32,9 @@ Sub Kntn_AddTableData()
     fieldtable = !*テーブルのフィールド名またはフィールドコード!
     kugirimoji = !*複数設定値の区切り文字!
     brank = !*ブランクとして認識する値!
-    excelFilePath = !*入力ファイルパス!
-    excelSheetName = !*シート名!
-    outputFilePath = !*処理結果ファイルパス!
-    canOverWriteFile = !*処理結果ファイルが既に存在するとき|上書き,エラー!
-    
-    Dim objFSO
-    Set objFSO = WScript.CreateObject("Scripting.FileSystemObject")
-    If objFSO.FileExists(outputFilePath) = True And canOverWriteFile = "エラー" Then
-        Err.Raise 1, "", "処理結果ファイルが既に存在しています。既存ファイルを移動する、または処理結果ファイルパスを変更してください。"
-    End If
+    csvFilePath = !*入力CSVファイルパス!
+    charcode = !*文字コード|shift-jis,utf-8!
+    outputFolderPath = !*処理結果出力フォルダ!
     
     successRecordCount = 0
     errorRecordCount = 0
@@ -68,16 +61,29 @@ Sub Kntn_AddTableData()
         Err.Raise 1, "", "「ブランクとして認識する値」の入力は必須です。"
     End If
     
-    If excelFilePath = "" Then
-        Err.Raise 1, "", "「入力ファイルパス」の入力は必須です。"
+    If csvFilePath = "" Then
+        Err.Raise 1, "", "「入力CSVファイルパス」の入力は必須です。"
     End If
     
-    If excelSheetName = "" Then
-        Err.Raise 1, "", "「シート名」の入力は必須です。"
+    If outputFolderPath = "" Then
+        Err.Raise 1, "", "「処理結果出力フォルダ」の入力は必須です。"
     End If
     
-    If outputFilePath = "" Then
-        Err.Raise 1, "", "「処理結果ファイルパス」の入力は必須です。"
+    Dim objFSO
+    Set objFSO = WScript.CreateObject("Scripting.FileSystemObject")
+    If Not objFSO.FileExists(csvFilePath) Then
+        Err.Raise 1, "", "入力CSVファイルが存在しません。ファイルパスを確認してください。"
+    End If
+    
+    'いったんファイル名の.csvは削除する
+    csvFileName = objFSO.GetFileName(csvFilePath)
+    extension = objFSO.GetExtensionName(csvFileName)
+    If StrComp(extension, "csv", 0) = 0 Then
+        csvFileName = Left(csvFileName, Len(csvFileName) - (Len(extension) + 1))
+    End If
+    
+    If Not objFSO.FolderExists(outputFolderPath) Then
+        Call KNTN_CreateIntermediateFolders(outputFolderPath)
     End If
     
     'Kintone API のエンドポイント
@@ -89,7 +95,6 @@ Sub Kntn_AddTableData()
     
     'フィールド情報一覧の情報をAPIで取得する。
     Dim json_fieldsInfo, json_properties
-    ' 修正1: CodeObject.Parse → Run("Parse", ...)
     Set json_fieldsInfo = kntn_ScriptEngine.Run("Parse", Kntn_GetFieldsInfo(kntn_app_id, kntn_guestspace_id))
     Set json_properties = json_fieldsInfo.properties
     
@@ -102,7 +107,6 @@ Sub Kntn_AddTableData()
         Err.Raise 1, "", "テーブルのフィールド名またはフィールドコードが正しくありません。"
     End If
     tableName = json_TableInfo.label
-    ' 修正2: Code → code (小文字)
     tableCode = json_TableInfo.code
     
     If Err.Number <> 0 Then
@@ -118,10 +122,9 @@ Sub Kntn_AddTableData()
     
     '入力ファイルのデータを配列に格納する
     Dim Array_EntryData
-    Array_EntryData = Kntn_GetArraybyExcel(excelFilePath, excelSheetName)
+    Array_EntryData = KNTN_ReadCsv(csvFilePath, charcode, 1)
     
     'ヘッダー情報をまとめたRootArrayを求める
-    ' 修正3: outputType変数を明示的に定義
     outputType = "全フィールド取得"
     Call Kntn_getHeaderArray(json_TableInfo.fields, outputType, nameOrCode, kntn_rootArray, fieldtable, lookUpArray, True)
     
@@ -164,7 +167,6 @@ Sub Kntn_AddTableData()
     Dim array_Rows()
     For i = 2 To UBound(Array_EntryData, 1)
         recordId = Array_EntryData(i, 1)
-        ' 修正4: 空レコードIDのフィルタリング
         If recordId <> "" And recordId <> brank Then
             If recordIdsDictionary.Exists(recordId) Then
                 exist_array_Rows = recordIdsDictionary.Item(recordId)
@@ -199,7 +201,7 @@ Sub Kntn_AddTableData()
     erroutputRow = 1
     
     'レコードIDの一覧を繰り返す
-    ' 修正5: VBScript DictionaryのKeysを配列として直接取得
+    ' VBScript DictionaryのKeysを配列として取得
     Dim recordIdKeysArray
     recordIdKeysArray = recordIdsDictionary.Keys
     Dim keysLength
@@ -210,7 +212,7 @@ Sub Kntn_AddTableData()
         flgFirstRow = True
         errmsg = ""
         
-        ' 修正6: VBScript Dictionaryから直接キーを取得
+        'VBScript Dictionaryから直接キーを取得
         recordId = recordIdKeysArray(keyIdx)
         
         'アクセストークンの有効性を確認
@@ -226,7 +228,6 @@ Sub Kntn_AddTableData()
             ' レスポンステキストを取得
             responseText = .responseText
             statusCode = .status
-            ' 修正7: CodeObject.Parse → Run("Parse", ...)
             Set json = kntn_ScriptEngine.Run("Parse", responseText)
             
             If .status = 200 Then
@@ -237,7 +238,6 @@ Sub Kntn_AddTableData()
                 recordInfo = ""
                 
                 'JScript9対応: json_Tableの長さを取得
-                ' 修正8: .Length → Run("getArrayLength", ...)
                 Dim tableLength
                 tableLength = kntn_ScriptEngine.Run("getArrayLength", json_Table)
                 
@@ -368,7 +368,6 @@ Sub Kntn_AddTableData()
                     .Open "Put", kntn_api_uri, False
                     .setRequestHeader "Authorization", "Bearer " & kntn_access_token
                     .setRequestHeader "Content-Type", "application/json"
-                    .setRequestHeader "User-Agent", kntn_userAgent
                     .send sendData
                     
                     ' レスポンステキストを取得
@@ -439,7 +438,15 @@ Sub Kntn_AddTableData()
     SetUmsVariable $*成功レコード件数$, successRecordCount
     SetUmsVariable $*失敗レコード件数$, errorRecordCount
     
+    '処理結果ファイルとエラーファイルのパスを作成する。
+    dateTimeNow = Year(Now()) & Right("0" & Month(Now()), 2) & Right("0" & Day(Now()), 2) & _
+        Right("0" & Hour(Now()), 2) & Right("0" & Minute(Now()), 2) & Right("0" & Second(Now()), 2)
+    outputCsvPath = objFSO.BuildPath(outputFolderPath, csvFileName & "_処理結果_" & dateTimeNow & ".csv")
+    errorCsvPath = objFSO.BuildPath(outputFolderPath, csvFileName & "_エラーデータ_" & dateTimeNow & ".csv")
+    
     '処理結果ファイルを作成する
-    Call Kntn_SetArrayToExcel(outputFilePath, "エラーデータ", Array_ErrorData, "A1", False)
-    Call Kntn_SetArrayToExcel(outputFilePath, "処理結果", Array_OutputData, "A1", True)
+    If errorRecordCount > 0 Then
+        Call KNTN_SaveCsv(Array_ErrorData, errorCsvPath, charcode, 0)
+    End If
+    Call KNTN_SaveCsv(Array_OutputData, outputCsvPath, charcode, 0)
 End Sub

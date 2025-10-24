@@ -3,11 +3,11 @@
 ' -----------------------------------------------------------------------
 'Kintone連携(アクセストークン)が配置されているかの確認
 If IsEmpty(kntn_client_id) Then
-    Err.Raise 1, "", "WinActor for kintone ver1.1.1 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
+    Err.Raise 1, "", "WinActor for kintone ver1.1.0 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
 End If
 
 If IsEmpty(kntn_userAgent) Then
-    Err.Raise 1, "", "WinActor for kintone ver1.1.1 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
+    Err.Raise 1, "", "WinActor for kintone ver1.1.0 以降の『01_認証>Kintone連携(アクセストークン取得)』ライブラリを配置してください。"
 End If
 
 ' トークンのチェック
@@ -80,15 +80,21 @@ Sub Kntn_DeleteTableDataByCsv()
     
     'フィールド情報一覧の情報をAPIで取得する。
     Dim json_fieldsInfo, json_properties
-    Set json_fieldsInfo = kntn_ScriptEngine.CodeObject.Parse(Kntn_GetFieldsInfo(kntn_app_id, kntn_guestspace_id))
+    ' 修正1: CodeObject.Parse → Run("Parse", ...)
+    Set json_fieldsInfo = kntn_ScriptEngine.Run("Parse", Kntn_GetFieldsInfo(kntn_app_id, kntn_guestspace_id))
     Set json_properties = json_fieldsInfo.properties
     
     '該当のテーブルフィールドの情報を取得する。
     On Error Resume Next
     Dim json_TableInfo
     Set json_TableInfo = Kntn_getFieldJson(fieldtable, nameOrCode, json_properties)
+    If json_TableInfo Is Nothing Then
+        On Error GoTo 0
+        Err.Raise 1, "", "テーブルのフィールド名またはフィールドコードが正しくありません。"
+    End If
     tableName = json_TableInfo.label
-    tableCode = json_TableInfo.Code
+    ' 修正2: Code → code (小文字)
+    tableCode = json_TableInfo.code
     If Err.Number <> 0 Then
         On Error GoTo 0
         Err.Raise 1, "", "テーブルのフィールド名またはフィールドコードが正しくありません。"
@@ -180,16 +186,17 @@ Sub Kntn_DeleteTableDataByCsv()
     erroutputRow = 1
     
     'レコードIDの一覧を繰り返す
-    Dim recordIdKeys
-    Set recordIdKeys = kntn_ScriptEngine.Run("getKeys", recordIdsDictionary)
+    ' 修正3: VBScript DictionaryのKeysを配列として直接取得
+    Dim recordIdKeysArray
+    recordIdKeysArray = recordIdsDictionary.Keys
     Dim keysLength
-    keysLength = recordIdKeys.Length
+    keysLength = UBound(recordIdKeysArray) + 1
     
     For keyIdx = 0 To keysLength - 1
         flgFirstRow = True
         
-        'JScript9対応: キーを取得
-        recordId = kntn_ScriptEngine.Run("getArrayItem", recordIdKeys, keyIdx)
+        ' 修正4: VBScript Dictionaryから直接キーを取得
+        recordId = recordIdKeysArray(keyIdx)
         
         'アクセストークンの有効性を確認
         Call Kntn_CheckAccessTokenValidity(kntn_access_token, kntn_expires_date, kntn_refresh_token)
@@ -207,7 +214,8 @@ Sub Kntn_DeleteTableDataByCsv()
         End With
         
         If statusCode = 200 Then
-            Set json = kntn_ScriptEngine.CodeObject.Parse(responseText)
+            ' 修正5: CodeObject.Parse → Run("Parse", ...)
+            Set json = kntn_ScriptEngine.Run("Parse", responseText)
             '既存のテーブルのデータをjsonパラメータにする。
             Set json_record = json.record
             Set json_Table = kntn_ScriptEngine.Run("getProperty", json_record, tableCode)
@@ -218,8 +226,9 @@ Sub Kntn_DeleteTableDataByCsv()
             recordInfo = ""
             
             'JScript9対応: json_Tableの長さを取得
+            ' 修正6: .Length → Run("getArrayLength", ...)
             Dim tableLength
-            tableLength = json_Table.Length
+            tableLength = kntn_ScriptEngine.Run("getArrayLength", json_Table)
             
             'テーブルの各行のデータを取得する
             For tableIdx = 0 To tableLength - 1
